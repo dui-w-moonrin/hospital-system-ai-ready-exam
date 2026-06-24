@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import unittest
 
-from src.priority_queue import order_patients
+from src.priority_queue import get_urgent_patient, order_patients
 
 
 class PriorityQueueTests(unittest.TestCase):
@@ -17,6 +17,14 @@ class PriorityQueueTests(unittest.TestCase):
     def test_invalid_severity_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "severity must be an integer from 1 to 10"):
             order_patients([{"id": "N1", "triage": "NORMAL", "severity": 11, "arrived_at": datetime.now(timezone.utc)}])
+
+    def test_get_urgent_patient_returns_the_first_ranked_patient(self):
+        now = datetime(2026, 3, 19, 10, 0, tzinfo=timezone.utc)
+        patients = [
+            {"id": "N1", "triage": "NORMAL", "severity": 10, "arrived_at": datetime(2026, 3, 19, 9, 58, tzinfo=timezone.utc)},
+            {"id": "E1", "triage": "EMERGENCY", "severity": 1, "arrived_at": datetime(2026, 3, 19, 9, 59, tzinfo=timezone.utc)},
+        ]
+        self.assertEqual(get_urgent_patient(patients, now)["id"], "E1")
 
 
 if __name__ == "__main__":

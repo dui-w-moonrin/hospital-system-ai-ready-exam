@@ -35,3 +35,9 @@ def order_patients(patients, now=None):
             ),
         )
     ]
+
+
+def get_urgent_patient(queue, current_time=None):
+    """Return the next patient to treat, or None when the queue is empty."""
+    ordered_queue = order_patients(queue, current_time)
+    return ordered_queue[0] if ordered_queue else None

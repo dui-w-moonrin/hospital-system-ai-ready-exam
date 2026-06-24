@@ -4,11 +4,31 @@
 
 This repository deliberately favours **safe, explainable system design** over an unfinished UI. It contains executable reference code for the queue and claim logic, PostgreSQL SQL for appointment availability, and concise architecture answers for all seven questions.
 
+## Exam brief (for video narration)
+
+### Part 1 — Technical & High-Stakes Logic (40 points)
+
+1. **The Intelligent Priority Queue (15):** Write `getUrgentPatient(queue, currentTime)`. Emergency (E) is before Normal (N); within a group use Severity Score 1–10; a Normal patient waiting over 60 minutes is temporarily escalated to Emergency-equivalent priority. Explain performance with 10,000 patients.
+2. **Complex SQL — Doctor's Availability (10):** Find available doctors on **19 March 2026, 10:00–11:00**. Exclude a doctor with a `confirmed` appointment in the interval, a doctor on a break according to `doctor_shifts`, and an appointment that overlaps into 10:00.
+3. **Code Review — The Race Condition (15):** Repair concurrent insurance-limit claims. Identify SQL Injection and Race Condition, and rewrite using a database transaction and row-level locking (`SELECT FOR UPDATE`).
+
+### Part 2 — Business Architecture & Safety (30 points)
+
+4. **Drug Allergy & Safety Design (15):** Design `drug_allergies` and `prescriptions` with constraints that prevent an allergic prescription; describe alert and override workflow.
+5. **System Scalability — Lab Results (15):** Design high-resolution X-Ray storage and smooth mobile delivery (compression/internal CDN), while enforcing PDPA privacy.
+
+### Part 3 — AI Integrity (30 points)
+
+6. **Symptom to Structured Data (10):** Write a prompt that turns this text into JSON: _“ปวดท้องบิดๆ มา 2 ชั่วโมง กินส้มตำปูปลาร้ามา”_. Prevent diagnosis/hallucination; return only patient-provided facts.
+7. **Smart Drug Interaction Checker (20):** Draw the integration between drug database and AI model. Design human-in-the-loop safety when the AI is uncertain.
+
+> **Narration tip:** State the requirement first, then open the linked evidence below and explain the safety decision behind it.
+
 ## Contents
 
 | Exam item | Evidence |
 |---|---|
-| 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` |
+| 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` (`get_urgent_patient`) |
 | 2. Doctor availability SQL | `sql/doctor-availability.sql` |
 | 3. Race condition / injection | `src/claim_insurance.py`, `docs/01-03-technical.md` |
 | 4–5. Drug safety and lab scale | `docs/04-05-business-safety.md` |

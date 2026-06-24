@@ -4,7 +4,7 @@
 
 **Rule interpretation:** Emergency is always a separate, non-negotiable priority tier. For Normal cases, severity is `1..10`; after a 60-minute wait the patient receives an escalation boost so that an old Normal case cannot starve behind new arrivals. Ties use earlier arrival first (FIFO), which is explainable to staff.
 
-`src/priority_queue.py` implements `order_patients(patients, now)`. Complexity is **O(n log n)** because it creates one scored record per patient and sorts them. Queue insertion can be improved to **O(log n)** with a heap in a long-lived service, but sorting is clearer and sufficient for a bounded triage-board refresh. Memory is **O(n)**.
+`src/priority_queue.py` exposes the requested `get_urgent_patient(queue, current_time)`, backed by `order_patients`. Complexity is **O(n log n)** because it creates one scored record per patient and sorts them. At 10,000 patients this is fast enough for a periodic triage-board refresh; a long-lived queue can use a heap for **O(log n)** insertion. Memory is **O(n)**.
 
 Operational safeguards:
 
@@ -14,7 +14,7 @@ Operational safeguards:
 
 ## 2. Complex SQL — Doctor availability
 
-The SQL is in [`sql/doctor-availability.sql`](../sql/doctor-availability.sql). It finds a `confirmed` doctor who has a shift fully covering a 100-minute request starting 15 December 2026 at 10:00, and has no pending/confirmed appointment that overlaps it.
+The SQL is in [`sql/doctor-availability.sql`](../sql/doctor-availability.sql). It finds an active doctor working through **19 March 2026, 10:00–11:00**, who has no overlapping `confirmed` appointment and no overlapping `BREAK` shift.
 
 The critical overlap condition is:
 

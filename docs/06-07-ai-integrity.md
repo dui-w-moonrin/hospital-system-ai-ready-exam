@@ -12,6 +12,7 @@ Return valid JSON matching the supplied schema. Use null or [] for absent facts.
 Schema:
 {
   "symptoms": [{"name": "string", "duration_hours": "number|null"}],
+  "food_intake": ["string"],
   "negated_symptoms": ["string"],
   "medications_mentioned": ["string"],
   "source_language": "th",
@@ -25,7 +26,8 @@ For the stated sentence, a conservative valid result is:
 
 ```json
 {
-  "symptoms": [{"name":"headache","duration_hours":2}],
+  "symptoms": [{"name":"cramping abdominal pain","duration_hours":2}],
+  "food_intake":["som tam with crab and fermented fish"],
   "negated_symptoms": [],
   "medications_mentioned": [],
   "source_language":"th",
