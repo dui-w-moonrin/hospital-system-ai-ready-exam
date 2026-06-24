@@ -6,6 +6,24 @@
 
 Repository นี้เน้นการออกแบบระบบที่ปลอดภัย อธิบายเหตุผลได้ และนำไปพัฒนาต่อได้จริง มากกว่าการสร้างหน้าจอที่ยังทำไม่เสร็จ มีตัวอย่างโค้ดสำหรับระบบคิวและการตัดวงเงินประกัน, SQL สำหรับหาแพทย์ว่าง และเอกสารคำตอบครบทั้ง 7 ข้อ
 
+## แผนที่คำตอบใน Repository
+
+| ข้อ | ไฟล์คำตอบ |
+|---|---|
+| 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` — ฟังก์ชัน `get_urgent_patient` |
+| 2. Doctor availability SQL | `sql/doctor-availability.sql` |
+| 3. Race condition / SQL injection | `src/claim_insurance.py`, `docs/01-03-technical.md` |
+| 4–5. Drug safety และ Lab scalability | `docs/04-05-business-safety.md` |
+| 6–7. AI integrity | `docs/06-07-ai-integrity.md` |
+
+## วิธีรันตัวอย่างโค้ด
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+ชุดทดสอบใช้ Python standard library จึงไม่ต้องติดตั้ง dependency เพิ่ม ครอบคลุมการจัดลำดับ Emergency, การยกระดับผู้ป่วยที่รอนาน, การตรวจ input และการป้องกันค่า ID ที่มีลักษณะเป็น SQL Injection
+
 ## โจทย์ข้อสอบ
 
 ### ส่วนที่ 1 — Technical & High-Stakes Logic (40 คะแนน)
@@ -600,22 +618,4 @@ flowchart TD
 | Monitoring | ติดตาม sensitivity ของ severe interaction, false-alert burden, citation validity, override outcome และ model drift |
 
 **สรุป:** AI ทำหน้าที่ช่วยอธิบายโดยมีหลักฐานรองรับ ส่วน safety decision, การอนุมัติ และความรับผิดชอบยังอยู่กับ rule engine และบุคลากรทางการแพทย์เสมอ
-
-## แผนที่คำตอบใน Repository
-
-| ข้อ | ไฟล์คำตอบ |
-|---|---|
-| 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` — ฟังก์ชัน `get_urgent_patient` |
-| 2. Doctor availability SQL | `sql/doctor-availability.sql` |
-| 3. Race condition / SQL injection | `src/claim_insurance.py`, `docs/01-03-technical.md` |
-| 4–5. Drug safety และ Lab scalability | `docs/04-05-business-safety.md` |
-| 6–7. AI integrity | `docs/06-07-ai-integrity.md` |
-
-## วิธีรันตัวอย่างโค้ด
-
-```powershell
-python -m unittest discover -s tests -v
-```
-
-ชุดทดสอบใช้ Python standard library จึงไม่ต้องติดตั้ง dependency เพิ่ม ครอบคลุมการจัดลำดับ Emergency, การยกระดับผู้ป่วยที่รอนาน, การตรวจ input และการป้องกันค่า ID ที่มีลักษณะเป็น SQL Injection
 
