@@ -513,6 +513,85 @@ flowchart LR
 
 **สรุป:** AI ทำหน้าที่แปลงภาษาธรรมชาติเป็นข้อมูลมีโครงสร้างเท่านั้น การตีความทางการแพทย์ยังเป็นหน้าที่ของบุคลากรที่มีคุณสมบัติ
 
+## คำตอบข้อ 7 — Smart Drug Interaction Checker
+
+### 1) หลักการออกแบบ
+
+AI ไม่ควรเป็นผู้ตัดสินใจเรื่องความปลอดภัยของยาเพียงลำพัง ระบบจึงแยกบทบาทเป็น:
+
+- **Rule engine + curated drug knowledge base:** ให้ผล safety decision ที่คาดเดาได้ เช่น contraindication, interaction severity และ dose warning
+- **LLM:** อธิบายผลด้วยภาษาที่เข้าใจง่ายจากหลักฐานที่ retrieve ได้เท่านั้น ไม่สร้าง interaction ใหม่ ไม่สั่งยา และไม่อนุมัติใบสั่งยา
+- **Clinician / pharmacist:** เป็นผู้ตัดสินใจขั้นสุดท้ายและรับผิดชอบการ override
+
+### 2) Architecture
+
+```mermaid
+flowchart LR
+    Order["Prescription order"] --> Context["Patient context: allergies, age, renal function, current medications"]
+    Context --> Rules["Versioned rule engine"]
+    DrugDB[("Curated drug interaction knowledge base")] --> Rules
+    DrugDB --> Retrieve["Evidence retrieval with version and citation"]
+    Retrieve --> LLM["LLM explanation service"]
+    Rules --> Alert["Deterministic safety result"]
+    LLM --> Validate["Schema, citation and policy validator"]
+    Validate --> Alert
+    Alert --> UI["Clinician / pharmacist review UI"]
+    UI --> Decision{"Approve, change drug, or override"}
+    Decision --> Audit[("Immutable audit log")]
+    Audit --> Monitor["Quality monitoring and feedback"]
+```
+
+**ข้อมูลที่ส่งเข้า LLM ต้องเป็น minimum necessary และ pseudonymised เท่าที่ทำได้** เช่น drug identifiers, interaction facts และ clinical context ที่จำเป็น ไม่ส่งข้อมูลระบุตัวตนผู้ป่วยโดยไม่จำเป็น
+
+### 3) ผลลัพธ์ที่ระบบส่งให้ผู้ใช้
+
+ระบบควรแสดงผลแบบมีโครงสร้าง ไม่แสดงข้อความ AI ลอย ๆ:
+
+```json
+{
+  "rule_result": "HIGH_SEVERITY_INTERACTION",
+  "evidence": [
+    {"source_id": "KB-2026-031", "version": "2026.03", "summary": "..."}
+  ],
+  "llm_explanation": "คำอธิบายจากหลักฐานที่ค้นคืนได้",
+  "llm_confidence": "LOW | MEDIUM | HIGH",
+  "requires_human_review": true
+}
+```
+
+`rule_result` มาจาก rule engine ไม่ใช่ LLM ส่วน `llm_explanation` จะผ่าน schema/citation validator ก่อนแสดงผล หากไม่มีหลักฐานอ้างอิงที่ถูกต้อง ระบบจะไม่แสดงคำอธิบาย AI
+
+### 4) Safety First เมื่อ AI ไม่มั่นใจ
+
+```mermaid
+flowchart TD
+    A["Rule engine ตรวจ interaction"] --> B{"พบ high-severity rule หรือไม่"}
+    B -- "พบ" --> C["Block การอนุมัติอัตโนมัติ + แจ้งเตือนแพทย์/เภสัชกร"]
+    B -- "ไม่พบ" --> D["LLM อธิบายจาก retrieved evidence"]
+    D --> E{"confidence ต่ำ, citation ไม่ครบ หรือ schema ไม่ผ่านหรือไม่"}
+    E -- "ใช่" --> F["Fail safe: ไม่ให้คำแนะนำเชิงอนุมัติ"]
+    F --> G["แสดงหลักฐานที่มี + ส่ง human review"]
+    E -- "ไม่ใช่" --> H["แสดงคำอธิบายพร้อม citation"]
+    C --> I["Clinician / pharmacist ตัดสินใจ"]
+    G --> I
+    H --> I
+    I --> J["บันทึก decision, reason, evidence version และ audit log"]
+```
+
+เมื่อ AI ให้คำตอบที่ไม่มั่นใจ ระบบต้องไม่ตีความว่า “ปลอดภัย” แต่แสดงสถานะ เช่น **“ไม่สามารถยืนยัน interaction จากหลักฐานที่มี — ต้องให้เภสัชกรหรือแพทย์ทบทวน”** พร้อม evidence ที่ค้นคืนได้ หาก retrieval, model หรือ validator ล่ม ผล deterministic จาก rule engine ยังต้องแสดงได้ และระบบไม่ควรปล่อยให้สั่งยาต่อโดยเงียบ ๆ
+
+### 5) Human-in-the-loop และการกำกับดูแล
+
+| จุดควบคุม | การออกแบบ |
+|---|---|
+| High-severity interaction | block การลงนาม/จ่ายยาจนกว่าจะมี clinician review |
+| Override | บันทึกผู้ตัดสินใจ, clinical reason, เวลา, rule/evidence version และอาจต้อง second sign-off ตาม policy |
+| Pharmacist review | เภสัชกรตรวจ interaction, ให้ข้อเสนอแนะ และ hold การจ่ายยาได้ |
+| Model/KB update | ประเมินก่อนใช้งานจริง, version ทุกครั้ง และ rollback ได้ |
+| Monitoring | ติดตาม sensitivity ของ severe interaction, false-alert burden, citation validity, override outcome และ model drift |
+
+**สรุป:** AI ทำหน้าที่ช่วยอธิบายโดยมีหลักฐานรองรับ ส่วน safety decision, การอนุมัติ และความรับผิดชอบยังอยู่กับ rule engine และบุคลากรทางการแพทย์เสมอ
+
 ## แผนที่คำตอบใน Repository
 
 | ข้อ | ไฟล์คำตอบ |
