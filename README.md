@@ -12,7 +12,7 @@ Repository นี้เน้นการออกแบบระบบที่
 |---|---|
 | 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` — ฟังก์ชัน `get_urgent_patient` |
 | 2. Doctor availability SQL | `sql/doctor-availability.sql` |
-| 3. Race condition / SQL injection | `src/claim_insurance.py`, `docs/01-03-technical.md` |
+| 3. Race condition / SQL injection | `src/claim_insurance.py`, `tests/test_claim_insurance.py`, `docs/01-03-technical.md` |
 | 4–5. Drug safety และ Lab scalability | `docs/04-05-business-safety.md` |
 | 6–7. AI integrity | `docs/06-07-ai-integrity.md` |
 
