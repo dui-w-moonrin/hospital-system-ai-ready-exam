@@ -117,6 +117,108 @@ flowchart TD
 
 **สรุป:** `O(n log n)` สำหรับ 10,000 คนยังทำงานได้รวดเร็วมากในระบบเว็บทั่วไป และมีข้อดีคือแสดงคิวทั้งหมดบนหน้าจอ triage ได้ทันที หากต้องการเพียง “ผู้ป่วยคนถัดไป” ในระบบขนาดใหญ่ขึ้น สามารถปรับเป็นการวนหาอันดับสูงสุดเพียงรอบเดียว (`O(n)`) หรือใช้ priority queue/heap เพื่อให้การเพิ่มและดึงคิวเร็วขึ้นได้
 
+## คำตอบข้อ 2 — Complex SQL: Doctor's Availability
+
+### 1) สมมติฐานของตาราง
+
+- `doctors(id, full_name, status)` — ใช้ `status = 'confirmed'` สำหรับแพทย์ที่พร้อมรับนัด
+- `doctor_shifts(doctor_id, starts_at, ends_at, shift_type)` — `shift_type` เป็น `WORK` หรือ `BREAK`
+- `appointments(doctor_id, starts_at, ends_at, status)` — ใช้ `status = 'confirmed'` สำหรับนัดที่มีผลจริง
+- เวลาเก็บเป็น `timestamptz`; ช่วงเวลานัดใช้รูปแบบ `[starts_at, ends_at)` เพื่อให้นัดที่จบ 10:00 และนัดใหม่เริ่ม 10:00 อยู่ต่อกันได้โดยไม่ชนกัน
+
+### 2) SQL ค้นหารายชื่อแพทย์ว่าง
+
+```sql
+-- PostgreSQL: ค้นหาแพทย์ว่างวันที่ 19 มีนาคม 2026 เวลา 10:00–11:00
+WITH request AS (
+  SELECT
+    (DATE '2026-03-19' + TIME '10:00') AT TIME ZONE 'Asia/Bangkok' AS starts_at,
+    (DATE '2026-03-19' + TIME '11:00') AT TIME ZONE 'Asia/Bangkok' AS ends_at
+)
+SELECT d.id, d.full_name
+FROM doctors d
+CROSS JOIN request r
+WHERE d.status = 'confirmed'
+  -- แพทย์ต้องทำงานครอบคลุมทั้งช่วงเวลาที่ร้องขอ
+  AND EXISTS (
+    SELECT 1
+    FROM doctor_shifts s
+    WHERE s.doctor_id = d.id
+      AND s.shift_type = 'WORK'
+      AND s.starts_at <= r.starts_at
+      AND s.ends_at >= r.ends_at
+  )
+  -- ถ้ามีช่วงพักกะที่ทับกับช่วงนัด ให้ตัดแพทย์คนนั้นออก
+  AND NOT EXISTS (
+    SELECT 1
+    FROM doctor_shifts s
+    WHERE s.doctor_id = d.id
+      AND s.shift_type = 'BREAK'
+      AND s.starts_at < r.ends_at
+      AND s.ends_at > r.starts_at
+  )
+  -- ถ้ามีนัด confirmed ที่ทับกับช่วงนัด ให้ตัดแพทย์คนนั้นออก
+  AND NOT EXISTS (
+    SELECT 1
+    FROM appointments a
+    WHERE a.doctor_id = d.id
+      AND a.status = 'confirmed'
+      AND a.starts_at < r.ends_at
+      AND a.ends_at > r.starts_at
+  )
+ORDER BY d.full_name;
+```
+
+SQL ไฟล์แยกอยู่ที่ [`sql/doctor-availability.sql`](sql/doctor-availability.sql) เพื่อใช้กับ database ได้โดยตรง
+
+### 3) เงื่อนไข Overlap ที่สำคัญ
+
+```sql
+existing.starts_at < request.ends_at
+AND existing.ends_at > request.starts_at
+```
+
+ตัวอย่างนัดเดิม **09:30–10:30** และช่วงที่ค้นหา **10:00–11:00**:
+
+- `09:30 < 11:00` เป็นจริง
+- `10:30 > 10:00` เป็นจริง
+
+เมื่อทั้งสองเงื่อนไขเป็นจริง แปลว่าช่วงเวลาทับกัน จึงไม่แสดงแพทย์คนนั้น ผลลัพธ์นี้ครอบคลุมกรณีนัดเริ่มก่อน 10:00 แล้วล้นเข้ามาในช่วงที่ค้นหาด้วย
+
+### 4) SQL Logical Order
+
+> ลำดับนี้คือ **logical order เพื่ออธิบายความหมายของ SQL**; database optimizer อาจเลือกแผนรันจริงต่างออกไปเพื่อประสิทธิภาพ
+
+```mermaid
+flowchart TD
+    A["WITH request: สร้างช่วงเวลา 19 มี.ค. 2026 10:00-11:00"] --> B["FROM doctors + CROSS JOIN request"]
+    B --> C["WHERE: เลือกเฉพาะแพทย์ status confirmed"]
+    C --> D{"มี WORK shift ครอบคลุมทั้งช่วงหรือไม่"}
+    D -- "ไม่" --> X["ตัดออก"]
+    D -- "มี" --> E{"มี BREAK shift ทับช่วงหรือไม่"}
+    E -- "มี" --> X
+    E -- "ไม่มี" --> F{"มี appointment confirmed ทับช่วงหรือไม่"}
+    F -- "มี" --> X
+    F -- "ไม่มี" --> G["SELECT id, full_name"]
+    G --> H["ORDER BY full_name"]
+    H --> I["รายชื่อแพทย์ว่าง"]
+```
+
+ลำดับที่ใช้เล่า SQL คือ:
+
+1. `WITH request` สร้างเวลาเริ่มและเวลาจบเพียงครั้งเดียว เพื่อไม่ hard-code เวลาซ้ำหลายจุด
+2. `FROM doctors d CROSS JOIN request r` นำแพทย์ทุกคนมาเปรียบเทียบกับช่วงเวลาที่ต้องการ
+3. `WHERE d.status = 'confirmed'` เก็บเฉพาะแพทย์ที่พร้อมรับนัด
+4. `EXISTS` ตรวจว่ามี `WORK` shift ครอบคลุม 10:00–11:00 จริง
+5. `NOT EXISTS` ตัวแรกตัดแพทย์ที่มี `BREAK` shift ทับช่วงเวลาออก
+6. `NOT EXISTS` ตัวที่สองตัดแพทย์ที่มีนัด `confirmed` ทับช่วงเวลาออก
+7. `SELECT` เลือกเฉพาะ `id` และ `full_name` ของผู้ที่ผ่านทุกเงื่อนไข
+8. `ORDER BY` เรียงชื่อเพื่อให้ผลลัพธ์อ่านง่ายและคงที่
+
+### 5) ประสิทธิภาพและข้อควรเพิ่มใน production
+
+ควรสร้าง index ที่ `appointments(doctor_id, starts_at, ends_at)` สำหรับนัด `confirmed` และ `doctor_shifts(doctor_id, starts_at, ends_at)` เพื่อให้การตรวจ `EXISTS/NOT EXISTS` ไม่ต้อง scan ทั้งตารางทุกครั้ง เมื่อระบบมีการจองนัดพร้อมกันจริง ควรเพิ่ม transaction และ exclusion constraint ของ PostgreSQL เพื่อกันสอง request จอง slot เดียวกันพร้อมกัน
+
 ## แผนที่คำตอบใน Repository
 
 | ข้อ | ไฟล์คำตอบ |
