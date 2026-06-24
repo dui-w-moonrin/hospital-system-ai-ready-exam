@@ -4,7 +4,7 @@
 
 **Rule interpretation:** Emergency is always a separate, non-negotiable priority tier. For Normal cases, severity is `1..10`; after a 60-minute wait the patient receives an escalation boost so that an old Normal case cannot starve behind new arrivals. Ties use earlier arrival first (FIFO), which is explainable to staff.
 
-`src/priorityQueue.mjs` implements `orderPatients(patients, now)`. Complexity is **O(n log n)** because it creates one scored record per patient and sorts them. Queue insertion can be improved to **O(log n)** with a heap in a long-lived service, but sorting is clearer and sufficient for a bounded triage-board refresh. Memory is **O(n)**.
+`src/priority_queue.py` implements `order_patients(patients, now)`. Complexity is **O(n log n)** because it creates one scored record per patient and sorts them. Queue insertion can be improved to **O(log n)** with a heap in a long-lived service, but sorting is clearer and sufficient for a bounded triage-board refresh. Memory is **O(n)**.
 
 Operational safeguards:
 
@@ -32,7 +32,7 @@ The original pattern has two defects:
 1. **Race condition:** two requests read the same balance before either writes, allowing an overspend or a lost update.
 2. **SQL injection:** interpolating `patientId` creates executable SQL from user-controlled input.
 
-The safest compact fix is a single atomic conditional update, defined in `src/claimInsurance.mjs`:
+The safest compact fix is a single atomic conditional update, defined in `src/claim_insurance.py`:
 
 ```sql
 UPDATE patients
@@ -41,6 +41,6 @@ WHERE id = $2 AND insurance_limit >= $3
 RETURNING id, insurance_limit;
 ```
 
-The DB driver receives `[treatmentCost, patientId, treatmentCost]` as bound parameters—never a concatenated string. A returned row means the claim succeeded; zero rows means “patient missing or insufficient limit” and should return a non-sensitive business response.
+The DB driver receives `(treatment_cost, patient_id, treatment_cost)` as bound parameters—never a concatenated string. A returned row means the claim succeeded; zero rows means “patient missing or insufficient limit” and should return a non-sensitive business response.
 
 For a multi-row claim (claim header, treatment record, balance, audit event), wrap all statements in one database transaction at `READ COMMITTED` or stronger. Lock the patient row with `SELECT ... FOR UPDATE` before dependent reads, then write the audit event before commit. An idempotency key (`patient_id`, external_request_id) prevents duplicate retries from charging twice. Do not log raw insurance/medical details; log request ID and outcome only.

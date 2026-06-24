@@ -8,19 +8,19 @@ This repository deliberately favours **safe, explainable system design** over an
 
 | Exam item | Evidence |
 |---|---|
-| 1. Intelligent Priority Queue | `src/priorityQueue.mjs`, `test/priorityQueue.test.mjs` |
+| 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` |
 | 2. Doctor availability SQL | `sql/doctor-availability.sql` |
-| 3. Race condition / injection | `src/claimInsurance.mjs`, `docs/01-03-technical.md` |
+| 3. Race condition / injection | `src/claim_insurance.py`, `docs/01-03-technical.md` |
 | 4–5. Drug safety and lab scale | `docs/04-05-business-safety.md` |
 | 6–7. AI integrity | `docs/06-07-ai-integrity.md` |
 
 ## Run the executable examples
 
 ```powershell
-node --test
+python -m unittest discover -s tests -v
 ```
 
-The test suite covers emergency-first triage, wait-time escalation, validation, and injection-shaped identifiers. The project intentionally has no external dependency.
+The standard-library test suite covers emergency-first triage, wait-time escalation, validation, and injection-shaped identifiers. The project intentionally has no external dependency.
 
 ## Key assumptions
 
