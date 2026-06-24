@@ -1,4 +1,6 @@
-# คำตอบข้อสอบ Hospital System — AI-Ready
+# คำตอบข้อสอบ Hospital System
+
+## โดย วัชรพงษ์ มูลรินทร์ สมัครตำแหน่ง Junior System Analyst / Project Co-Ordinator (AI-Ready Edition)
 
 > คำตอบสำหรับแบบทดสอบ Fullstack Developer (Specialized: Hospital System)
 
