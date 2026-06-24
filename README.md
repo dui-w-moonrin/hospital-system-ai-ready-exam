@@ -134,40 +134,37 @@ WITH request AS (
   SELECT
     (DATE '2026-03-19' + TIME '10:00') AT TIME ZONE 'Asia/Bangkok' AS starts_at,
     (DATE '2026-03-19' + TIME '11:00') AT TIME ZONE 'Asia/Bangkok' AS ends_at
+),
+working_doctors AS (
+  SELECT DISTINCT s.doctor_id
+  FROM doctor_shifts s CROSS JOIN request r
+  WHERE s.shift_type = 'WORK'
+    AND s.starts_at <= r.starts_at AND s.ends_at >= r.ends_at
+),
+break_doctors AS (
+  SELECT DISTINCT s.doctor_id
+  FROM doctor_shifts s CROSS JOIN request r
+  WHERE s.shift_type = 'BREAK'
+    AND s.starts_at < r.ends_at AND s.ends_at > r.starts_at
+),
+booked_doctors AS (
+  SELECT DISTINCT a.doctor_id
+  FROM appointments a CROSS JOIN request r
+  WHERE a.status = 'confirmed'
+    AND a.starts_at < r.ends_at AND a.ends_at > r.starts_at
 )
 SELECT d.id, d.full_name
 FROM doctors d
-CROSS JOIN request r
+JOIN working_doctors w ON w.doctor_id = d.id
+LEFT JOIN break_doctors b ON b.doctor_id = d.id
+LEFT JOIN booked_doctors a ON a.doctor_id = d.id
 WHERE d.status = 'confirmed'
-  -- แพทย์ต้องทำงานครอบคลุมทั้งช่วงเวลาที่ร้องขอ
-  AND EXISTS (
-    SELECT 1
-    FROM doctor_shifts s
-    WHERE s.doctor_id = d.id
-      AND s.shift_type = 'WORK'
-      AND s.starts_at <= r.starts_at
-      AND s.ends_at >= r.ends_at
-  )
-  -- ถ้ามีช่วงพักกะที่ทับกับช่วงนัด ให้ตัดแพทย์คนนั้นออก
-  AND NOT EXISTS (
-    SELECT 1
-    FROM doctor_shifts s
-    WHERE s.doctor_id = d.id
-      AND s.shift_type = 'BREAK'
-      AND s.starts_at < r.ends_at
-      AND s.ends_at > r.starts_at
-  )
-  -- ถ้ามีนัด confirmed ที่ทับกับช่วงนัด ให้ตัดแพทย์คนนั้นออก
-  AND NOT EXISTS (
-    SELECT 1
-    FROM appointments a
-    WHERE a.doctor_id = d.id
-      AND a.status = 'confirmed'
-      AND a.starts_at < r.ends_at
-      AND a.ends_at > r.starts_at
-  )
+  AND b.doctor_id IS NULL
+  AND a.doctor_id IS NULL
 ORDER BY d.full_name;
 ```
+
+CTE ทำให้แต่ละกลุ่มมีชื่อที่สื่อความหมาย และ query สุดท้ายอ่านได้ว่า “เลือกแพทย์ที่ทำงาน แล้วตัดคนที่พักกะหรือมีนัดออก” โดย PostgreSQL optimizer ยังสามารถเลือก execution plan ที่มีประสิทธิภาพได้
 
 SQL ไฟล์แยกอยู่ที่ [`sql/doctor-availability.sql`](sql/doctor-availability.sql) เพื่อใช้กับ database ได้โดยตรง
 
@@ -191,33 +188,33 @@ AND existing.ends_at > request.starts_at
 
 ```mermaid
 flowchart TD
-    A["WITH request: สร้างช่วงเวลา 19 มี.ค. 2026 10:00-11:00"] --> B["FROM doctors + CROSS JOIN request"]
-    B --> C["WHERE: เลือกเฉพาะแพทย์ status confirmed"]
-    C --> D{"มี WORK shift ครอบคลุมทั้งช่วงหรือไม่"}
-    D -- "ไม่" --> X["ตัดออก"]
-    D -- "มี" --> E{"มี BREAK shift ทับช่วงหรือไม่"}
-    E -- "มี" --> X
-    E -- "ไม่มี" --> F{"มี appointment confirmed ทับช่วงหรือไม่"}
-    F -- "มี" --> X
-    F -- "ไม่มี" --> G["SELECT id, full_name"]
-    G --> H["ORDER BY full_name"]
-    H --> I["รายชื่อแพทย์ว่าง"]
+    A["request: สร้างช่วงเวลา 19 มี.ค. 2026 10:00-11:00"] --> B["working_doctors: กะ WORK ครอบคลุมช่วง"]
+    A --> C["break_doctors: กะ BREAK ทับช่วง"]
+    A --> D["booked_doctors: นัด confirmed ทับช่วง"]
+    B --> E["JOIN doctors ที่ทำงาน"]
+    C --> F["LEFT JOIN กลุ่มพักกะ"]
+    D --> G["LEFT JOIN กลุ่มมีนัด"]
+    E --> H["WHERE status confirmed และ break/booked id เป็น NULL"]
+    F --> H
+    G --> H
+    H --> I["SELECT id, full_name แล้ว ORDER BY"]
+    I --> J["รายชื่อแพทย์ว่าง"]
 ```
 
 ลำดับที่ใช้เล่า SQL คือ:
 
-1. `WITH request` สร้างเวลาเริ่มและเวลาจบเพียงครั้งเดียว เพื่อไม่ hard-code เวลาซ้ำหลายจุด
-2. `FROM doctors d CROSS JOIN request r` นำแพทย์ทุกคนมาเปรียบเทียบกับช่วงเวลาที่ต้องการ
-3. `WHERE d.status = 'confirmed'` เก็บเฉพาะแพทย์ที่พร้อมรับนัด
-4. `EXISTS` ตรวจว่ามี `WORK` shift ครอบคลุม 10:00–11:00 จริง
-5. `NOT EXISTS` ตัวแรกตัดแพทย์ที่มี `BREAK` shift ทับช่วงเวลาออก
-6. `NOT EXISTS` ตัวที่สองตัดแพทย์ที่มีนัด `confirmed` ทับช่วงเวลาออก
-7. `SELECT` เลือกเฉพาะ `id` และ `full_name` ของผู้ที่ผ่านทุกเงื่อนไข
-8. `ORDER BY` เรียงชื่อเพื่อให้ผลลัพธ์อ่านง่ายและคงที่
+1. `request` สร้างเวลาเริ่มและเวลาจบเพียงครั้งเดียว เพื่อไม่ hard-code เวลาซ้ำหลายจุด
+2. `working_doctors` เก็บเฉพาะแพทย์ที่มี `WORK` shift ครอบคลุม 10:00–11:00
+3. `break_doctors` เก็บแพทย์ที่มี `BREAK` shift ทับช่วงเวลา เพื่อนำไปตัดออกภายหลัง
+4. `booked_doctors` เก็บแพทย์ที่มีนัด `confirmed` ทับช่วงเวลา รวมถึงนัดที่เริ่มก่อน 10:00
+5. query สุดท้าย `JOIN` กับ `working_doctors` จึงเหลือเฉพาะแพทย์ที่ทำงาน
+6. `LEFT JOIN` กับ `break_doctors` และ `booked_doctors` เพื่อระบุกลุ่มที่ต้องตัดออก
+7. `WHERE b.doctor_id IS NULL AND a.doctor_id IS NULL` เก็บเฉพาะคนที่ไม่พักกะและไม่มีนัดชนกัน
+8. `SELECT` เลือก `id`, `full_name` แล้ว `ORDER BY` เรียงชื่อเพื่อให้ผลลัพธ์อ่านง่ายและคงที่
 
 ### 5) ประสิทธิภาพและข้อควรเพิ่มใน production
 
-ควรสร้าง index ที่ `appointments(doctor_id, starts_at, ends_at)` สำหรับนัด `confirmed` และ `doctor_shifts(doctor_id, starts_at, ends_at)` เพื่อให้การตรวจ `EXISTS/NOT EXISTS` ไม่ต้อง scan ทั้งตารางทุกครั้ง เมื่อระบบมีการจองนัดพร้อมกันจริง ควรเพิ่ม transaction และ exclusion constraint ของ PostgreSQL เพื่อกันสอง request จอง slot เดียวกันพร้อมกัน
+ควรสร้าง index ที่ `appointments(doctor_id, starts_at, ends_at)` สำหรับนัด `confirmed` และ `doctor_shifts(doctor_id, starts_at, ends_at)` เพื่อให้ CTE และ joins ไม่ต้อง scan ทั้งตารางทุกครั้ง เมื่อระบบมีการจองนัดพร้อมกันจริง ควรเพิ่ม transaction และ exclusion constraint ของ PostgreSQL เพื่อกันสอง request จอง slot เดียวกันพร้อมกัน
 
 ## แผนที่คำตอบใน Repository
 
