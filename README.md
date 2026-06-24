@@ -216,6 +216,91 @@ flowchart TD
 
 ควรสร้าง index ที่ `appointments(doctor_id, starts_at, ends_at)` สำหรับนัด `confirmed` และ `doctor_shifts(doctor_id, starts_at, ends_at)` เพื่อให้ CTE และ joins ไม่ต้อง scan ทั้งตารางทุกครั้ง เมื่อระบบมีการจองนัดพร้อมกันจริง ควรเพิ่ม transaction และ exclusion constraint ของ PostgreSQL เพื่อกันสอง request จอง slot เดียวกันพร้อมกัน
 
+## คำตอบข้อ 3 — Code Review: Race Condition และ SQL Injection
+
+### 1) ปัญหาในโค้ดเดิม
+
+| ปัญหา | เกิดขึ้นอย่างไร | ผลกระทบ |
+|---|---|---|
+| SQL Injection | นำ `patientId` และ `treatmentCost` มาต่อเป็น SQL string โดยตรง | ผู้โจมตีอาจเปลี่ยนเงื่อนไข SQL หรืออ่าน/แก้ข้อมูลที่ไม่ควรเข้าถึง |
+| Race Condition | สอง request อ่านวงเงินเดียวกันก่อนที่ request ใดจะ update | ระบบอนุมัติการเบิกเกินวงเงินจริง หรือเกิด lost update |
+
+**ตัวอย่าง Race Condition:** วงเงินเริ่มต้น 100 บาท, เครื่อง A และ B ขอเบิกเครื่องละ 60 บาทพร้อมกัน ทั้งสองเครื่องอ่านค่า 100 และผ่านเงื่อนไข จากนั้นทั้งคู่ update เหลือ 40 บาท ผลคืออนุมัติรวม 120 บาท ทั้งที่วงเงินมีเพียง 100 บาท
+
+### 2) แนวทางแก้ไข
+
+ใช้ database transaction เพื่อให้ขั้นตอนอ่าน-ตรวจ-ตัดวงเงินเป็นงานเดียวกัน และใช้ `SELECT ... FOR UPDATE` เพื่อ lock แถวผู้ป่วยคนนั้นจนกว่า transaction จะ `COMMIT` หรือ `ROLLBACK` request ที่สองของผู้ป่วยคนเดิมจึงต้องรอและจะอ่านวงเงินล่าสุดหลัง request แรกเสร็จ
+
+```python
+LOCK_PATIENT_SQL = """
+SELECT insurance_limit
+FROM patients
+WHERE id = %s
+FOR UPDATE;
+"""
+
+CLAIM_SQL = """
+UPDATE patients
+SET insurance_limit = insurance_limit - %s
+WHERE id = %s;
+"""
+
+def claim_insurance(connection, patient_id, treatment_cost):
+    build_claim_params(patient_id, treatment_cost)
+
+    with connection.transaction():
+        patient = connection.fetch_one(LOCK_PATIENT_SQL, (patient_id,))
+
+        if patient is None or patient["insurance_limit"] < treatment_cost:
+            return False
+
+        connection.execute(CLAIM_SQL, (treatment_cost, patient_id))
+        return True
+```
+
+> `build_claim_params()` ตรวจว่า `patient_id` และ `treatment_cost` เป็นจำนวนเต็มบวกก่อนเริ่ม transaction
+
+### 3) Transaction และ row lock ทำงานอย่างไร
+
+```mermaid
+sequenceDiagram
+    participant A as "เครื่อง A"
+    participant DB as "Database"
+    participant B as "เครื่อง B"
+
+    A->>DB: BEGIN
+    A->>DB: SELECT insurance_limit FOR UPDATE
+    DB-->>A: Lock แถวผู้ป่วย, วงเงิน 100
+    B->>DB: BEGIN + SELECT ... FOR UPDATE
+    Note over B,DB: เครื่อง B รอ lock
+    A->>DB: ตรวจ 100 >= 60, UPDATE ลด 60
+    A->>DB: COMMIT
+    DB-->>B: ได้ lock แล้ว, อ่านวงเงินล่าสุด 40
+    B->>DB: ตรวจ 40 < 60, ไม่ UPDATE
+    B->>DB: COMMIT
+```
+
+เมื่อเครื่อง A commit แล้ว เครื่อง B จะเห็นวงเงินใหม่ 40 บาท จึงปฏิเสธการเบิก 60 บาท ไม่เกิดการใช้วงเงินเกิน
+
+### 4) ป้องกัน SQL Injection
+
+ค่าที่รับจากผู้ใช้ไม่ถูกต่อเข้า SQL string แต่ส่งเป็น parameter แยกต่างหาก:
+
+```python
+connection.fetch_one(LOCK_PATIENT_SQL, (patient_id,))
+connection.execute(CLAIM_SQL, (treatment_cost, patient_id))
+```
+
+DB driver จะ bind ค่า parameter ให้ จึงไม่ตีความค่าอย่าง `"1 OR 1=1"` เป็นคำสั่ง SQL เพิ่มเติม อีกทั้ง validation บังคับให้ `patient_id` และ `treatment_cost` เป็นจำนวนเต็มบวกก่อนเริ่ม transaction
+
+### 5) ข้อควรเพิ่มใน production
+
+- ใช้ idempotency key เช่น `(patient_id, external_request_id)` เพื่อกันการกดซ้ำหรือ retry ซ้ำตัดวงเงินสองครั้ง
+- บันทึก audit log ของ claim โดยเก็บ request ID, ผลลัพธ์ และเวลา แต่ไม่บันทึกข้อมูลสุขภาพเกินจำเป็น
+- หาก transaction ผิดพลาดต้อง rollback ทั้งการตัดวงเงินและการสร้าง claim record พร้อมกัน
+
+ตัวอย่างโค้ดและ unit test อยู่ที่ [`src/claim_insurance.py`](src/claim_insurance.py) และ [`tests/test_claim_insurance.py`](tests/test_claim_insurance.py)
+
 ## แผนที่คำตอบใน Repository
 
 | ข้อ | ไฟล์คำตอบ |

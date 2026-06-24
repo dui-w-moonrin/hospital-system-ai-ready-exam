@@ -32,15 +32,15 @@ The original pattern has two defects:
 1. **Race condition:** two requests read the same balance before either writes, allowing an overspend or a lost update.
 2. **SQL injection:** interpolating `patientId` creates executable SQL from user-controlled input.
 
-The safest compact fix is a single atomic conditional update, defined in `src/claim_insurance.py`:
+โจทย์กำหนดให้ใช้ transaction และ row-level locking ดังนั้น reference implementation ใน `src/claim_insurance.py` ใช้ `SELECT ... FOR UPDATE` ก่อนตรวจและตัดวงเงิน:
 
 ```sql
-UPDATE patients
-SET insurance_limit = insurance_limit - $1
-WHERE id = $2 AND insurance_limit >= $3
-RETURNING id, insurance_limit;
+SELECT insurance_limit
+FROM patients
+WHERE id = %s
+FOR UPDATE;
 ```
 
-The DB driver receives `(treatment_cost, patient_id, treatment_cost)` as bound parameters—never a concatenated string. A returned row means the claim succeeded; zero rows means “patient missing or insufficient limit” and should return a non-sensitive business response.
+หลัง lock แล้วจึงตรวจวงเงินใน application และรัน `UPDATE patients SET insurance_limit = insurance_limit - %s WHERE id = %s` โดย DB driver receives `(treatment_cost, patient_id)` as bound parameters—never a concatenated string. วงเงินไม่พอหรือไม่พบผู้ป่วยจะ return `False` โดยไม่ update.
 
 For a multi-row claim (claim header, treatment record, balance, audit event), wrap all statements in one database transaction at `READ COMMITTED` or stronger. Lock the patient row with `SELECT ... FOR UPDATE` before dependent reads, then write the audit event before commit. An idempotency key (`patient_id`, external_request_id) prevents duplicate retries from charging twice. Do not log raw insurance/medical details; log request ID and outcome only.
