@@ -1,64 +1,77 @@
-# Hospital System — AI-Ready Solution
+# คำตอบข้อสอบ Hospital System — AI-Ready
 
-> Submission for the Fullstack Developer (Specialized: Hospital System) e-Exam.
+> คำตอบสำหรับแบบทดสอบ Fullstack Developer (Specialized: Hospital System)
 
-This repository deliberately favours **safe, explainable system design** over an unfinished UI. It contains executable reference code for the queue and claim logic, PostgreSQL SQL for appointment availability, and concise architecture answers for all seven questions.
+Repository นี้เน้นการออกแบบระบบที่ปลอดภัย อธิบายเหตุผลได้ และนำไปพัฒนาต่อได้จริง มากกว่าการสร้างหน้าจอที่ยังทำไม่เสร็จ มีตัวอย่างโค้ดสำหรับระบบคิวและการตัดวงเงินประกัน, SQL สำหรับหาแพทย์ว่าง และเอกสารคำตอบครบทั้ง 7 ข้อ
 
-## Exam brief (for video narration)
+## โจทย์ข้อสอบ
 
-### Part 1 — Technical & High-Stakes Logic (40 points)
+### ส่วนที่ 1 — Technical & High-Stakes Logic (40 คะแนน)
 
-1. **The Intelligent Priority Queue (15):** Write `getUrgentPatient(queue, currentTime)`. Emergency (E) is before Normal (N); within a group use Severity Score 1–10; a Normal patient waiting over 60 minutes is temporarily escalated to Emergency-equivalent priority. Explain performance with 10,000 patients.
-2. **Complex SQL — Doctor's Availability (10):** Find available doctors on **19 March 2026, 10:00–11:00**. Exclude a doctor with a `confirmed` appointment in the interval, a doctor on a break according to `doctor_shifts`, and an appointment that overlaps into 10:00.
-3. **Code Review — The Race Condition (15):** Repair concurrent insurance-limit claims. Identify SQL Injection and Race Condition, and rewrite using a database transaction and row-level locking (`SELECT FOR UPDATE`).
+1. **The Intelligent Priority Queue (15 คะแนน)**
+   - เขียน `getUrgentPatient(queue, currentTime)`
+   - Emergency (E) ต้องมาก่อน Normal (N) เสมอ
+   - ถ้าอยู่กลุ่มเดียวกัน ให้ผู้ที่มี Severity Score (1–10) สูงกว่าได้รับการรักษาก่อน
+   - Normal ที่รอเกิน 60 นาที จะถูกขยับ Priority ขึ้นมาเทียบเท่า Emergency ชั่วคราว
+   - วิเคราะห์ Time Complexity เมื่อคิวมี 10,000 คน
 
-### Part 2 — Business Architecture & Safety (30 points)
+2. **Complex SQL — Doctor's Availability (10 คะแนน)**
+   - หาแพทย์ว่างในวันที่ 19 มีนาคม 2026 เวลา 10:00–11:00
+   - ต้องไม่มีนัดที่ `status = 'confirmed'` ในช่วงดังกล่าว
+   - ต้องไม่อยู่ในช่วงพักกะจากตาราง `doctor_shifts`
+   - ต้องรองรับนัดก่อนหน้าที่เวลาล้นมาทับช่วง 10:00
 
-4. **Drug Allergy & Safety Design (15):** Design `drug_allergies` and `prescriptions` with constraints that prevent an allergic prescription; describe alert and override workflow.
-5. **System Scalability — Lab Results (15):** Design high-resolution X-Ray storage and smooth mobile delivery (compression/internal CDN), while enforcing PDPA privacy.
+3. **Code Review — The Race Condition (15 คะแนน)**
+   - แก้โค้ดตัดวงเงินประกัน เมื่อมีการเบิกจาก 2 เครื่องพร้อมกัน
+   - ระบุปัญหา SQL Injection และ Race Condition
+   - เขียนใหม่ด้วย Database Transaction และ Row-level Locking (`SELECT FOR UPDATE`)
 
-### Part 3 — AI Integrity (30 points)
+### ส่วนที่ 2 — Business Architecture & Safety (30 คะแนน)
 
-6. **Symptom to Structured Data (10):** Write a prompt that turns this text into JSON: _“ปวดท้องบิดๆ มา 2 ชั่วโมง กินส้มตำปูปลาร้ามา”_. Prevent diagnosis/hallucination; return only patient-provided facts.
-7. **Smart Drug Interaction Checker (20):** Draw the integration between drug database and AI model. Design human-in-the-loop safety when the AI is uncertain.
+4. **Drug Allergy & Safety Design (15 คะแนน)**
+   - ออกแบบตาราง `drug_allergies` และ `prescriptions`
+   - ระบุ Database Constraint ที่ป้องกันใบสั่งยาสำหรับยาที่ผู้ป่วยแพ้
+   - อธิบาย Alert และผู้มีสิทธิ์ Override
 
-> **Narration tip:** State the requirement first, then open the linked evidence below and explain the safety decision behind it.
+5. **System Scalability — Lab Results (15 คะแนน)**
+   - ออกแบบการจัดเก็บภาพ X-Ray ความละเอียดสูง และการส่งผล Lab ให้ลื่นบนมือถือ เช่น compression หรือ CDN ภายใน
+   - อธิบายมาตรการ PDPA เพื่อไม่ให้ผล Lab รั่วไหลออกนอกองค์กร
 
-## Contents
+### ส่วนที่ 3 — AI Integrity (30 คะแนน)
 
-| Exam item | Evidence |
+6. **Symptom to Structured Data (10 คะแนน)**
+   - เขียน Prompt เพื่อแปลงข้อความเป็น JSON: _“ปวดท้องบิดๆ มา 2 ชั่วโมง กินส้มตำปูปลาร้ามา”_
+   - ป้องกัน AI วินิจฉัยโรคเอง (Hallucination) และบังคับให้ตอบเฉพาะข้อมูลที่ผู้ป่วยให้มา
+
+7. **Smart Drug Interaction Checker (20 คะแนน)**
+   - วาด Diagram การเชื่อมต่อระหว่างฐานข้อมูลยากับ AI Model
+   - ออกแบบ Human-in-the-loop เมื่อ AI ให้คำแนะนำที่ไม่มั่นใจ
+
+## แผนที่คำตอบใน Repository
+
+| ข้อ | ไฟล์คำตอบ |
 |---|---|
-| 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` (`get_urgent_patient`) |
+| 1. Intelligent Priority Queue | `src/priority_queue.py`, `tests/test_priority_queue.py` — ฟังก์ชัน `get_urgent_patient` |
 | 2. Doctor availability SQL | `sql/doctor-availability.sql` |
-| 3. Race condition / injection | `src/claim_insurance.py`, `docs/01-03-technical.md` |
-| 4–5. Drug safety and lab scale | `docs/04-05-business-safety.md` |
+| 3. Race condition / SQL injection | `src/claim_insurance.py`, `docs/01-03-technical.md` |
+| 4–5. Drug safety และ Lab scalability | `docs/04-05-business-safety.md` |
 | 6–7. AI integrity | `docs/06-07-ai-integrity.md` |
 
-## Run the executable examples
+## วิธีรันตัวอย่างโค้ด
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-The standard-library test suite covers emergency-first triage, wait-time escalation, validation, and injection-shaped identifiers. The project intentionally has no external dependency.
+ชุดทดสอบใช้ Python standard library จึงไม่ต้องติดตั้ง dependency เพิ่ม ครอบคลุมการจัดลำดับ Emergency, การยกระดับผู้ป่วยที่รอนาน, การตรวจ input และการป้องกันค่า ID ที่มีลักษณะเป็น SQL Injection
 
-## Key assumptions
+## สมมติฐานสำคัญในการออกแบบ
 
-- All timestamps are stored as `timestamptz` in UTC and displayed in `Asia/Bangkok`.
-- Appointment time intervals are half-open: `[starts_at, ends_at)`. Back-to-back appointments therefore do not overlap.
-- A model never makes the final clinical decision. It can extract, retrieve, and explain; a qualified clinician approves any safety-relevant action.
-- In this reference rule, any Normal patient waiting at least 60 minutes is escalated above newly arriving Normal patients, but **never above an Emergency patient**.
+- เวลาในฐานข้อมูลเก็บเป็น `timestamptz` แบบ UTC และแสดงผลเป็นเขตเวลา `Asia/Bangkok`
+- ช่วงเวลานัดหมายใช้รูปแบบ `[starts_at, ends_at)` จึงอนุญาตให้นัดหนึ่งจบพอดีกับอีกนัดเริ่มได้
+- AI ไม่มีสิทธิ์ตัดสินใจทางคลินิกขั้นสุดท้าย ทำหน้าที่ได้เฉพาะสกัดข้อมูล ค้นหลักฐาน และอธิบายผล; บุคลากรที่มีคุณสมบัติต้องเป็นผู้อนุมัติ
+- Normal ที่รอเกิน 60 นาทีถูกยกระดับเหนือ Normal ที่เพิ่งมา แต่ไม่แซง Emergency
 
-## 8–10 minute video outline
+## การใช้ AI และความรับผิดชอบของมนุษย์
 
-1. **0:00–0:40** — Repository map and safety-first design principle.
-2. **0:40–2:10** — Queue rule and unit tests; explain why emergency is an immutable priority tier.
-3. **2:10–3:20** — Availability SQL and the interval-overlap predicate.
-4. **3:20–4:35** — Atomic insurance claim update; parameter binding and transaction isolation.
-5. **4:35–6:10** — Allergy data model, override audit trail, and lab storage/CDN privacy.
-6. **6:10–8:40** — Strict symptom JSON extraction and drug-interaction human-in-the-loop workflow.
-7. **8:40–9:10** — Tests, limitations, and production next steps.
-
-## AI use and human accountability
-
-AI was used as a drafting and review accelerator. The final solution applies explicit assumptions, deterministic rules for safety-critical paths, parameterized SQL, schema validation, auditability, and human approval gates. These controls matter more than simply adding an LLM.
+AI ถูกใช้เป็นเครื่องมือช่วยร่างและตรวจทานเท่านั้น คำตอบสุดท้ายกำหนด assumption ชัดเจน ใช้กฎที่คาดเดาได้กับส่วนที่มีความเสี่ยงสูง, parameterized SQL, schema validation, audit trail และ human approval gate ซึ่งสำคัญกว่าการเพิ่ม LLM เข้าระบบเพียงอย่างเดียว
