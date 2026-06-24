@@ -1,38 +1,50 @@
-# Questions 1–3 — Technical & High-Stakes Logic
+# ข้อ 1–3 — Technical & High-Stakes Logic
 
-## 1. Intelligent Priority Queue
+เอกสารนี้เป็น technical reference ของคำตอบใน [README](../README.md) โดยยึด source code และ SQL ใน repository เป็นแหล่งข้อมูลเดียว (single source of truth)
 
-**Rule interpretation:** Emergency is always a separate, non-negotiable priority tier. For Normal cases, severity is `1..10`; after a 60-minute wait the patient receives an escalation boost so that an old Normal case cannot starve behind new arrivals. Ties use earlier arrival first (FIFO), which is explainable to staff.
+## ข้อ 1 — Intelligent Priority Queue
 
-`src/priority_queue.py` exposes the requested `get_urgent_patient(queue, current_time)`, backed by `order_patients`. Complexity is **O(n log n)** because it creates one scored record per patient and sorts them. At 10,000 patients this is fast enough for a periodic triage-board refresh; a long-lived queue can use a heap for **O(log n)** insertion. Memory is **O(n)**.
+โค้ดอยู่ที่ [`src/priority_queue.py`](../src/priority_queue.py) และ test อยู่ที่ [`tests/test_priority_queue.py`](../tests/test_priority_queue.py)
 
-Operational safeguards:
+- แบ่งเป็น 2 tier: `EMERGENCY` มาก่อน `NORMAL` เสมอ
+- ภายใน tier เดียวกันใช้ `severity` 1–10 จากมากไปน้อย
+- Normal ที่รออย่างน้อย 60 นาทีได้รับคะแนน boost 10 เพื่อป้องกัน starvation แต่ไม่แซง Emergency จริง
+- คะแนนเท่ากันใช้เวลามาถึงก่อนเป็น tie-breaker
 
-- Record every automated priority change with rule version, previous/new score, timestamp, and actor/service ID.
-- Do not expose a score as a diagnosis; triage staff may override it with a reason.
-- Use a single service clock and UTC storage to avoid inconsistent wait calculations.
+`get_urgent_patient(queue, current_time)` เรียก `order_patients()` แล้วคืนคนแรก หรือ `None` เมื่อคิวว่าง โค้ดที่เรียงทั้งคิวมี complexity `O(n log n)` และ memory `O(n)` จึงเหมาะกับ triage board ที่มี 10,000 คน หากต้องการเพียงคนถัดไปในระบบขนาดใหญ่มาก สามารถใช้ one-pass scan `O(n)` หรือ priority queue/heap ได้
 
-## 2. Complex SQL — Doctor availability
+## ข้อ 2 — Doctor's Availability
 
-The SQL is in [`sql/doctor-availability.sql`](../sql/doctor-availability.sql). It finds an active doctor working through **19 March 2026, 10:00–11:00**, who has no overlapping `confirmed` appointment and no overlapping `BREAK` shift.
+SQL อยู่ที่ [`sql/doctor-availability.sql`](../sql/doctor-availability.sql) และใช้ CTE 4 ชุด:
 
-The critical overlap condition is:
+1. `request` สร้างช่วงเวลา 19 มีนาคม 2026, 10:00–11:00
+2. `working_doctors` หาแพทย์ที่กะ `WORK` ครอบคลุมทั้งช่วง
+3. `break_doctors` หาแพทย์ที่กะ `BREAK` ทับช่วง
+4. `booked_doctors` หาแพทย์ที่มีนัด `confirmed` ทับช่วง
+
+Query สุดท้าย `JOIN working_doctors` และ `LEFT JOIN` อีกสองกลุ่ม จากนั้นเลือกเฉพาะ `break_doctors` และ `booked_doctors` ที่เป็น `NULL`
+
+เงื่อนไข overlap ใช้ interval แบบ half-open `[start, end)`:
 
 ```sql
-existing.starts_at < requested.ends_at
-AND existing.ends_at > requested.starts_at
+existing.starts_at < request.ends_at
+AND existing.ends_at > request.starts_at
 ```
 
-This catches contained, enclosing, and partial overlaps. It correctly permits an appointment ending exactly when the requested one starts. In production I would add the documented composite indexes and, for PostgreSQL, consider an exclusion constraint on `tstzrange(starts_at, ends_at, '[)')` per doctor to prevent a race between availability checking and booking.
+จึงตรวจได้แม้นัดเดิมเริ่ม 09:30 และสิ้นสุด 10:30 ซึ่งทับกับช่วงค้นหา 10:00–11:00
 
-## 3. Code review — Insurance limit race condition and SQL injection
+ควรมี index ที่ `appointments(doctor_id, starts_at, ends_at)` สำหรับ `status = 'confirmed'` และ `doctor_shifts(doctor_id, starts_at, ends_at)` เพื่อรองรับข้อมูลนัดหมายจำนวนมาก
 
-The original pattern has two defects:
+## ข้อ 3 — Insurance Claim: Injection และ Race Condition
 
-1. **Race condition:** two requests read the same balance before either writes, allowing an overspend or a lost update.
-2. **SQL injection:** interpolating `patientId` creates executable SQL from user-controlled input.
+โค้ดอยู่ที่ [`src/claim_insurance.py`](../src/claim_insurance.py) และ test อยู่ที่ [`tests/test_claim_insurance.py`](../tests/test_claim_insurance.py)
 
-โจทย์กำหนดให้ใช้ transaction และ row-level locking ดังนั้น reference implementation ใน `src/claim_insurance.py` ใช้ `SELECT ... FOR UPDATE` ก่อนตรวจและตัดวงเงิน:
+ปัญหาเดิมมี 2 ส่วน:
+
+- **SQL Injection:** การต่อ `patientId` หรือ `treatmentCost` เข้า SQL string เปิดโอกาสให้ input เปลี่ยนความหมาย query
+- **Race Condition:** สอง request อ่านวงเงินเดียวกันก่อน update จึงอาจอนุมัติยอดรวมเกินวงเงินจริง
+
+แนวทางแก้คือเริ่ม transaction แล้ว lock แถวผู้ป่วยก่อนอ่านวงเงิน:
 
 ```sql
 SELECT insurance_limit
@@ -41,6 +53,12 @@ WHERE id = %s
 FOR UPDATE;
 ```
 
-หลัง lock แล้วจึงตรวจวงเงินใน application และรัน `UPDATE patients SET insurance_limit = insurance_limit - %s WHERE id = %s` โดย DB driver receives `(treatment_cost, patient_id)` as bound parameters—never a concatenated string. วงเงินไม่พอหรือไม่พบผู้ป่วยจะ return `False` โดยไม่ update.
+หลัง lock แล้วจึงตรวจวงเงินและ update ด้วย bound parameters:
 
-For a multi-row claim (claim header, treatment record, balance, audit event), wrap all statements in one database transaction at `READ COMMITTED` or stronger. Lock the patient row with `SELECT ... FOR UPDATE` before dependent reads, then write the audit event before commit. An idempotency key (`patient_id`, external_request_id) prevents duplicate retries from charging twice. Do not log raw insurance/medical details; log request ID and outcome only.
+```sql
+UPDATE patients
+SET insurance_limit = insurance_limit - %s
+WHERE id = %s;
+```
+
+request ที่สองของผู้ป่วยคนเดิมต้องรอ lock และจะอ่านวงเงินล่าสุดหลัง request แรก commit จึงไม่เกิด lost update หรือ overspend ต้องเพิ่ม idempotency key และ audit log ใน production เพื่อป้องกัน retry ซ้ำและรองรับการตรวจสอบย้อนหลัง

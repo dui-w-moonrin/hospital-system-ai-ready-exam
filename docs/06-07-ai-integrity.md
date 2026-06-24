@@ -1,64 +1,49 @@
-# Questions 6–7 — AI Integrity
+# ข้อ 6–7 — AI Integrity
 
-## 6. Symptom to structured data
+เอกสารนี้เป็น safety reference ที่สอดคล้องกับคำตอบใน [README](../README.md)
 
-The input text is treated as **untrusted clinical narrative**, not a diagnosis. A strict prompt asks for extraction only:
+## ข้อ 6 — Symptom to Structured Data
 
-```text
-System: You are a clinical text extraction component. Extract only facts explicitly
-stated by the user. Do not diagnose, infer, add a medicine, or give treatment advice.
-Return valid JSON matching the supplied schema. Use null or [] for absent facts.
+LLM ทำหน้าที่เป็น text extraction component เท่านั้น ไม่ใช่ระบบวินิจฉัยโรคหรือแนะนำการรักษา
 
-Schema:
-{
-  "symptoms": [{"name": "string", "duration_hours": "number|null"}],
-  "food_intake": ["string"],
-  "negated_symptoms": ["string"],
-  "medications_mentioned": ["string"],
-  "source_language": "th",
-  "needs_clinician_review": true
-}
+### Output contract
 
-User text: {{verbatim_text}}
-```
-
-For the stated sentence, a conservative valid result is:
+อนุญาตเฉพาะ field ที่มีหลักฐานจากข้อความผู้ป่วย:
 
 ```json
 {
-  "symptoms": [{"name":"cramping abdominal pain","duration_hours":2}],
-  "food_intake":["som tam with crab and fermented fish"],
-  "negated_symptoms": [],
-  "medications_mentioned": [],
-  "source_language":"th",
-  "needs_clinician_review":true
+  "symptoms": [{"text": "string", "duration_hours": "number|null"}],
+  "food_intake": ["string"],
+  "medications_mentioned": ["string"],
+  "negated_symptoms": ["string"],
+  "needs_clinician_review": true
 }
 ```
 
-The server validates JSON against a schema, rejects extra fields, stores original text separately, and shows the extraction to a human for correction. Prompt injection is reduced by putting the user text in a delimited data field; it never changes system instructions. If the model emits medical advice, unsupported facts, invalid JSON, or low-confidence extraction, fail closed: return “unable to reliably extract; clinician review required.”
+สำหรับข้อความ “ปวดท้องบิดๆ มา 2 ชั่วโมง กินส้มตำปูปลาร้ามา” ผลลัพธ์ต้องมีเพียงอาการ, ระยะเวลา และอาหารที่กล่าวถึง ห้ามเพิ่ม diagnosis เช่นอาหารเป็นพิษ หรือตั้งชื่อยาที่ไม่ได้กล่าวถึง
 
-## 7. Smart Drug Interaction Checker
+### Hallucination controls
 
-### Architecture
+- system prompt ห้าม diagnose, infer cause, recommend treatment/medicine และกำหนดให้คืน JSON only
+- schema validation ปฏิเสธ key เกิน, type ผิด หรือ JSON ที่ parse ไม่ได้
+- content policy ปฏิเสธ diagnosis/advice/unsupported facts แม้ JSON จะ valid
+- ข้อความผู้ป่วยเป็น untrusted data ใน delimiter เพื่อลด prompt injection
+- `needs_clinician_review` เป็น true เสมอ; clinician ตรวจและแก้ผลก่อนใช้ทางคลินิก
+- เก็บ raw message, model/prompt version, output และผู้แก้ไขเพื่อ audit
 
-```mermaid
-flowchart LR
-  Order[Prescription order] --> Rules[Versioned drug/ingredient rule engine]
-  Allergy[Allergy + renal + patient context] --> Rules
-  Rules -->|known contraindication| Alert[Severity-ranked alert]
-  Evidence[Curated interaction knowledge base] --> Retrieve[Evidence retrieval]
-  Retrieve --> LLM[LLM explanation service]
-  LLM --> Guard[Schema + citation + policy validator]
-  Guard --> Alert
-  Alert --> Clinician[Clinician approves, changes, or overrides]
-  Clinician --> Audit[Immutable audit log + feedback]
-```
+## ข้อ 7 — Smart Drug Interaction Checker
 
-The **rule engine and curated knowledge base** make the safety decision. The LLM is optional and constrained to explaining retrieved, versioned evidence in plain language; it cannot invent an interaction, approve an order, or prescribe an alternative. All model traffic uses a minimum necessary, pseudonymised context and is governed by approved data-processing terms.
+### Role separation
 
-### Human-in-the-loop and safe failure
+- **Versioned rule engine + curated knowledge base:** ให้ deterministic safety result เช่น contraindication และ severity
+- **Evidence retrieval:** ดึงหลักฐานที่มี source ID และ version
+- **LLM:** สร้างคำอธิบายจากหลักฐานที่ retrieve มาได้เท่านั้น
+- **Clinician/pharmacist:** approve, เปลี่ยนยา หรือ override และรับผิดชอบผลทางคลินิก
 
-- High-severity alert blocks completion until a clinician reviews it; override captures reason, identity, timestamp, evidence version, and (where policy requires) a second sign-off.
-- Display source, evidence date, confidence, and “not a substitute for clinical judgment”; avoid ungrounded confidence scores.
-- If retrieval, model, or validation fails, the deterministic rule result remains visible and the system routes to pharmacist/clinician review. It never silently permits the order.
-- Evaluate offline against clinician-labelled cases: sensitivity for severe interactions, false-alert burden, grounded-citation rate, JSON validity, latency, and override outcomes. Monitor drift after every knowledge-base/model change and retain a rollback version.
+LLM ไม่สามารถสร้าง interaction ใหม่, อนุมัติใบสั่งยา หรือแนะนำยาเอง ข้อมูลที่ส่งเข้า model ต้อง minimum necessary และ pseudonymised เท่าที่ทำได้
+
+### Low-confidence และ human-in-the-loop
+
+หาก rule engine พบ high-severity interaction ให้ block การอนุมัติอัตโนมัติ หาก AI confidence ต่ำ, citation ไม่ครบ, schema ไม่ผ่าน หรือ model/retrieval ล่ม ให้ fail safe: ไม่สรุปว่าปลอดภัย, แสดง deterministic result/evidence ที่มี และส่ง clinician หรือ pharmacist review
+
+ทุก decision และ override ต้องเก็บ reason, ผู้ตัดสินใจ, เวลา, rule/evidence version และ audit log การเปลี่ยน model/knowledge base ต้องมี evaluation, versioning, monitoring, rollback และติดตาม severe-interaction sensitivity, false-alert burden, citation validity และ override outcome

@@ -1,55 +1,44 @@
-# Questions 4–5 — Business Architecture & Safety
+# ข้อ 4–5 — Business Architecture & Safety
 
-## 4. Drug Allergy & Safety Design
+เอกสารนี้สรุป design reference ที่สอดคล้องกับคำตอบใน [README](../README.md)
 
-### Data model and constraints
+## ข้อ 4 — Drug Allergy & Safety Design
 
-```mermaid
-erDiagram
-  PATIENT ||--o{ PATIENT_ALLERGY : has
-  ALLERGEN ||--o{ PATIENT_ALLERGY : identifies
-  PATIENT ||--o{ PRESCRIPTION : receives
-  PRESCRIPTION ||--o{ PRESCRIPTION_ITEM : contains
-  DRUG ||--o{ PRESCRIPTION_ITEM : ordered_as
-  PRESCRIPTION_ITEM ||--o{ SAFETY_ALERT : triggers
-  SAFETY_ALERT ||--o| ALERT_OVERRIDE : may_have
-```
+schema และ trigger อยู่ที่ [`sql/drug-allergy-safety.sql`](../sql/drug-allergy-safety.sql)
 
-- `patient_allergy(patient_id, allergen_id, reaction, severity, recorded_by, recorded_at, status)` has `UNIQUE(patient_id, allergen_id)` for active records and FKs to patient/allergen.
-- `drug_ingredient(drug_id, ingredient_id)` allows cross-checking both brand and generic drug components against allergens.
-- `prescription_item` references a valid `prescription` and `drug`; status changes are append-only events rather than silent overwrites.
-- A database transaction inserts the order and generates the alert from the same ingredient snapshot, preventing a partial order without its check.
+### Data model
 
-### Workflow and override
+- `drug_allergies` เก็บ `patient_id`, `drug_id`, `reaction`, `severity`, `status`, ผู้บันทึก และเวลา
+- `prescriptions` เก็บ patient, drug, ผู้สั่ง, dose, status และข้อมูล override
+- `FOREIGN KEY` รับประกันว่า patient, drug และ user มีอยู่จริง
+- `CHECK` จำกัด severity/status และบังคับให้ override fields ครบทั้งชุดหรือไม่มีเลย
+- partial unique index ป้องกัน active allergy ของ patient-drug คู่เดิมซ้ำกัน
 
-1. Prescriber selects drug and dose; server performs deterministic allergy/ingredient matching.
-2. A match creates an immutable `safety_alert` with severity and evidence. Severe matches block signing by default.
-3. UI displays the allergen, reaction, source record, and recommended safe action—never a vague “warning”.
-4. A clinician override requires role authorization, free-text clinical reason, second confirmation for severe reactions, timestamp, and audit event. It is not a button that silently dismisses the warning.
-5. Pharmacy verifies before dispensing; safety team reviews override metrics for unsafe patterns.
+การตรวจว่า prescription ชนกับ allergy เป็นการตรวจข้ามตาราง จึงใช้ `BEFORE INSERT OR UPDATE` trigger แทน `CHECK` ธรรมดา trigger จะ block เมื่อพบ `drug_allergies.status = 'ACTIVE'` ที่ตรงกับ patient และ drug เว้นแต่ override มีเหตุผล, เวลา, ผู้รับผิดชอบ และผู้ override มี role ที่ได้รับอนุญาต
 
-## 5. System scalability — Lab images
+### Workflow และ override
 
-### Storage and delivery
+1. แพทย์เลือกยา ระบบตรวจ active allergy ก่อนบันทึก
+2. หากพบ allergy ให้แสดงชื่อยา, reaction, severity และแหล่งประวัติอย่างชัดเจน
+3. ทางเลือกหลักคือเปลี่ยนยาและตรวจซ้ำ
+4. หากจำเป็นต้องใช้ยาเดิม เฉพาะ `ATTENDING_PHYSICIAN` หรือ `SENIOR_PHYSICIAN` ที่มีสิทธิ์ `ALLERGY_OVERRIDE` จึง override ได้
+5. บันทึก clinical reason, เวลา, ผู้ override และ audit log; เภสัชกร hold การจ่ายยาและตรวจทานได้ แต่ไม่ bypass block
+6. กรณี severe allergy ควรมี second sign-off ก่อนจ่ายยา
 
-Upload directly from the Lab system via short-lived pre-signed URLs to object storage (for example S3/GCS/Azure Blob), not through the application server. Store the original as immutable encrypted object; generate lossless diagnostic derivatives and non-diagnostic thumbnails asynchronously. Metadata in the transactional DB contains object ID, patient ID, MIME type, checksum, retention class, and access audit pointer.
+## ข้อ 5 — Scalable และ Private Lab Results
 
-```mermaid
-flowchart LR
-  Lab[Lab device / PACS] -->|short-lived upload URL| Object[Private encrypted object storage]
-  Object --> Worker[Malware scan + image pipeline]
-  Worker --> Meta[(Metadata DB)]
-  Worker --> Derivative[Approved derivative]
-  Clinician --> API[Authenticated API]
-  API -->|authorized short-lived URL| CDN[Private CDN]
-  CDN --> Derivative
-```
+### Storage และ delivery
 
-Use CDN only for authorized derivatives. The origin is private; CDN signed URL/cookie has a short expiry, TLS, encryption at rest, no public bucket listing, and cache-key rules that never encode a patient identifier. For large DICOM/X-ray imagery, use streaming/range requests and a viewer designed for medical images rather than blanket compression that risks clinical quality.
+- เก็บ original DICOM/X-Ray ใน private encrypted object storage; relational database เก็บ metadata เช่น patient ID, object key, checksum และ retention class
+- Lab/PACS upload โดย pre-signed URL อายุสั้นตรงไป storage แล้ว worker ตรวจไฟล์และสร้าง thumbnail/mobile derivative แบบ asynchronous
+- เก็บ original ที่ diagnostic quality ไว้เสมอ หลีกเลี่ยง lossy compression ที่อาจกระทบการวินิจฉัย
+- Mobile app ผ่าน authenticated API ซึ่งตรวจ RBAC และ treatment relationship ก่อนออก signed URL/cookie ให้ private internal CDN
+- ใช้ derivative, HTTP range request และ progressive loading เพื่อเปิดภาพบนมือถือเร็วโดยไม่ต้องโหลด original ทุกครั้ง
 
 ### PDPA controls
 
-- Purpose limitation and minimum necessary access: role + treatment relationship + consent/legal basis are checked at API time.
-- Encrypt in transit and at rest with managed key rotation; separate production access from developer accounts.
-- Immutable audit logs record who viewed/downloaded which study and why; alert on bulk export.
-- Apply retention/deletion schedules, tested restore procedures, data-subject workflows, vendor DPAs, and incident response. De-identify data before analytics/training and keep the re-identification key separately.
+- purpose limitation และ minimum necessary access: เห็นเฉพาะผู้ป่วยที่เกี่ยวข้องกับการรักษา
+- TLS, encryption at rest, KMS/key rotation และไม่มี public bucket/CDN endpoint
+- immutable audit log สำหรับการดู/ดาวน์โหลด พร้อม alert เมื่อเกิด bulk export
+- retention/deletion policy, backup/restore test และ incident response ที่ revoke signed URL และตรวจ log ได้
+- de-identify ภาพก่อนใช้ analytics, model training หรือส่ง vendor; แยก re-identification key ออกต่างหาก
